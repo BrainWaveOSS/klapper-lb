@@ -1,0 +1,63 @@
+#!/bin/sh
+set -e -x
+
+# TODO: Also define the socket and family type for way cooler stuff like:
+# ipv4 to 6
+# ipv6 to 4
+# udp too
+
+trap exit TERM INT
+
+IPV4_PREFIX=${IPV4_PREFIX:-"10"}
+IPV6_PREFIX=${IPV6_PREFIX:-"fd00"}
+PROCESS_POLLING_INTERVAL=${PROCESS_POLLING_INTERVAL:-10}
+IPV4_LISTENER_PID=""
+IPV6_LISTENER_PID=""
+IPV4_LISTENER_ACTIVE=0
+IPV6_LISTENER_ACTIVE=0
+IPV4_DEST_IP=""
+IPV6_DEST_IP=""
+IPV4_SOURCE_ADDRESS=$(ip addr | grep -e "inet ${IPV4_PREFIX}.*" | awk '{print $2}' | awk -F '/' '{print $1}')
+IPV6_SOURCE_ADDRESS=$(ip addr | grep -e "inet6 ${IPV6_PREFIX}.*" | awk '{print $2}' | awk -F '/' '{print $1}')
+PROCESS_MONITOR_ENABLED=${PROCESS_MONITOR_ENABLED:-0}
+
+function ipv6_listener() {
+  socat tcp6-listen:${SRC_PORT},bind=${IPV6_SOURCE_ADDRESS},reuseaddr,fork tcp6:${IPV6_DEST_IP}:${DEST_PORT} & IPV6_LISTENER_PID=$!
+  IPV6_LISTENER_ACTIVE=1
+}
+
+function ipv4_listener() {
+  socat tcp4-listen:${SRC_PORT},bind=${IPV4_SOURCE_ADDRESS},reuseaddr,fork tcp4:${IPV4_DEST_IP}:${DEST_PORT} & IPV4_LISTENER_PID=$!
+  IPV4_LISTENER_ACTIVE=1
+}
+
+function process_monitor() {
+  while true
+  do
+    [ ${IPV4_LISTENER_ACTIVE} -gt 0 ] && [ -d "/proc/${IPV4_LISTENER_PID}" ] || exit 1
+    [ ${IPV6_LISTENER_ACTIVE} -gt 0 ] && [ -d "/proc/${IPV6_LISTENER_PID}" ] || exit 1
+    sleep ${PROCESS_POLLING_INTERVAL}
+  done
+}
+
+
+for dest_ip in ${DEST_IPS}
+do 
+  if echo ${dest_ip} | grep -Eq "\:"
+  then 
+    IPV6_DEST_IP=${dest_ip}
+    ipv6_listener
+  else 
+    IPV4_DEST_IP=${dest_ip}
+    ipv4_listener
+  fi
+done
+
+if [ ${PROCESS_MONITOR_ENABLED} -gt 0 ]
+then
+  process_monitor
+elif [ ! -e /pause ]
+then
+  mkfifo /pause
+fi
+</pause
